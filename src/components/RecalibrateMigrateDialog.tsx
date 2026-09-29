@@ -15,6 +15,8 @@ const KIND_LABEL: Record<GroupKind, string> = {
 interface RecalibrateMigrateProps {
   open: boolean;
   busy: boolean;
+  /** Worker 创建 / 计算失败原因（非空时展示原因并允许再次发起） */
+  error?: string | null;
   oldGroupCount: number;
   newGroups: AlignGroup[] | null;
   newCuesA: Cue[];
@@ -24,6 +26,8 @@ interface RecalibrateMigrateProps {
   calibrated: boolean;
   anchorCount: number;
   onClose(): void;
+  /** 失败后按最近一次迁移请求重新发起计算 */
+  onRetry(): void;
   onConfirm(): void;
 }
 
@@ -32,6 +36,7 @@ const PAGE = 50;
 export function RecalibrateMigrateDialog({
   open,
   busy,
+  error,
   oldGroupCount,
   newGroups,
   newCuesA,
@@ -40,6 +45,7 @@ export function RecalibrateMigrateDialog({
   calibrated,
   anchorCount,
   onClose,
+  onRetry,
   onConfirm,
 }: RecalibrateMigrateProps) {
   const [shown, setShown] = useState(PAGE);
@@ -47,7 +53,14 @@ export function RecalibrateMigrateDialog({
 
   const body = () => {
     if (busy) {
-      return <div className="rm-notice">正在用新校准重新对齐并比对旧工作区…</div>;
+      return <div className="rm-notice">正在后台 Web Worker 中用新校准重新对齐并比对旧工作区…计算中可随时「取消（保留旧工作区）」。</div>;
+    }
+    if (error) {
+      return (
+        <div className="rm-notice warn" role="alert">
+          对齐或迁移预览计算失败：{error}。旧工作区（对齐组与人工决定）保持不变，可点「再次计算」重试，或取消返回。
+        </div>
+      );
     }
     if (!plan || !newGroups) {
       return <div className="rm-notice">尚未生成新对齐方案。</div>;
@@ -121,9 +134,14 @@ export function RecalibrateMigrateDialog({
             时间选择一律使用新组默认值；消重、断行、节奏与切点吸附的采纳将被清空，迁移后可继续冲突处理、预览与导出。
           </span>
           <span className="spacer" />
-          <button className="btn ghost" onClick={onClose} disabled={busy}>
+          <button className="btn ghost" onClick={onClose}>
             取消（保留旧工作区）
           </button>
+          {error && !busy && (
+            <button className="btn" onClick={onRetry}>
+              再次计算
+            </button>
+          )}
           <button className="btn primary" onClick={onConfirm} disabled={busy || !plan?.ok}>
             确认并一次提交
           </button>

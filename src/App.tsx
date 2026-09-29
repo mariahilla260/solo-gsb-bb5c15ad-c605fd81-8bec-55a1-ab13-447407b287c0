@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react';
-import { alignCues, type AlignGroup } from './lib/align';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { AlignGroup } from './lib/align';
+import { AlignTaskRunner } from './lib/alignTask';
+import { errorMessage } from './lib/alignWorker';
 import {
   DEFAULT_CALIB_OPTIONS,
   fitCalibration,
   selectAnchors,
   type CalibOptions,
 } from './lib/calibrate';
-import { migrateStates, planMigration, type MigrationPlan } from './lib/migrate';
+import { migrateStates, type MigrationPlan } from './lib/migrate';
 import {
   autoFixTimes,
   buildMergedCues,
@@ -163,6 +165,9 @@ export default function App() {
   const [migrateMode, setMigrateMode] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [migrateBusy, setMigrateBusy] = useState(false);
+  /** Worker 计算失败原因（首次对齐失败展示在校准页，迁移失败展示在弹窗）。 */
+  const [alignError, setAlignError] = useState<string | null>(null);
+  const [migrateError, setMigrateError] = useState<string | null>(null);
   const [migrateData, setMigrateData] = useState<{
     oldGroups: AlignGroup[];
     oldStates: GroupState[];
@@ -172,36 +177,73 @@ export default function App() {
     plan: MigrationPlan;
   } | null>(null);
 
-  /** 用指定的 B 时间轴执行顺序对齐，并进入工作区。 */
-  const runAlign = (b: Cue[]) => {
+  // 对齐 / 迁移预览均在 Web Worker 中执行：每次计算新建 Worker、结束即释放；
+  // 任务序号由 runner 单调递增，迟到的成功 / 失败回调在 runner 内即被丢弃，
+  // 这里再以 token 双保险，绝不切换页面或覆盖新任务结果。
+  const runnerRef = useRef<AlignTaskRunner | null>(null);
+  if (!runnerRef.current) runnerRef.current = new AlignTaskRunner();
+  useEffect(() => () => runnerRef.current?.stop(), []);
+  /** 最近一次迁移请求参数，供失败后「再次计算」重放；取消 / 确认后清空。 */
+  const migrateRequestRef = useRef<{ b: Cue[]; calibrated: boolean } | null>(null);
+
+  /**
+   * 用指定的 B 时间轴在 Web Worker 中执行顺序对齐，成功后再进入工作区。
+   * commitB 在成功回调中执行：Worker 创建 / 计算失败时不改变已提交的时间轴选择。
+   */
+  const runAlign = (b: Cue[], commitB?: () => void) => {
+    setAlignError(null);
     setAligning(true);
-    // 让出一帧以渲染“对齐中”状态，再执行同步计算
-    window.setTimeout(() => {
-      const gs = alignCues(cuesA, b);
-      setGroups(gs);
-      setStates(gs.map((g) => defaultStateFor(g, cuesA, b)));
-      setAligning(false);
-      setFilter('all');
-      setVisibleCount(PAGE_SIZE);
-      setAutoFix(false);
-      setView('groups');
-      setWrapApplied(new Set());
-      setScrollAccepted(new Set());
-      setPaceAccepted(new Set());
-      setSnapAccepted(new Set());
-      setPhase('workspace');
-    }, 30);
+    runnerRef.current!.start(
+      { kind: 'align', cuesA, cuesB: b },
+      (res) => {
+        // 迟到结果已在 runner 内按序号丢弃；此处只会是当前任务
+        if (!res.ok || res.kind !== 'align') {
+          setAligning(false);
+          setAlignError(!res.ok ? res.error : '对齐任务返回了非预期结果');
+          return;
+        }
+        const { groups: gs, states: initialStates } = res.result;
+        commitB?.();
+        setGroups(gs);
+        setStates(initialStates);
+        setAligning(false);
+        setFilter('all');
+        setVisibleCount(PAGE_SIZE);
+        setAutoFix(false);
+        setView('groups');
+        setWrapApplied(new Set());
+        setScrollAccepted(new Set());
+        setPaceAccepted(new Set());
+        setSnapAccepted(new Set());
+        setPhase('workspace');
+      },
+      (err) => {
+        // 被取消 / 被新任务取代的失败回调已在 runner 内按序号丢弃，能到这里的都是当前任务失败
+        setAligning(false);
+        setAlignError(errorMessage(err));
+      },
+    );
+  };
+
+  /** 取消首次对齐：终止 Worker、结束忙碌并允许再次发起；停留在校准页。 */
+  const cancelAlign = () => {
+    runnerRef.current?.stop();
+    setAligning(false);
+    setAlignError(null);
   };
 
   const startCalibrate = () => {
     if (cuesA.length === 0 || cuesB.length === 0) return;
+    // 终止可能残留的旧计算（同一页发起新计算时由 runner 自动终止，这里作出口兜底）
+    runnerRef.current?.stop();
+    setAligning(false);
+    setAlignError(null);
     setPhase('calibrate');
   };
 
   const skipCalibrate = () => {
     if (cuesA.length === 0 || cuesB.length === 0) return;
-    setCuesBUsed(null);
-    runAlign(cuesB);
+    runAlign(cuesB, () => setCuesBUsed(null));
   };
 
   const applyCalibration = () => {
@@ -210,9 +252,8 @@ export default function App() {
       previewMigration(calibFit.mappedCues, true);
       return;
     }
-    // 提交校准后的 B 时间作为对齐输入（仅此处替换）
-    setCuesBUsed(calibFit.mappedCues);
-    runAlign(calibFit.mappedCues);
+    // 校准后的 B 时间仅在 Worker 对齐成功后才提交为对齐输入
+    runAlign(calibFit.mappedCues, () => setCuesBUsed(calibFit.mappedCues));
   };
 
   const restoreOriginalB = () => {
@@ -220,8 +261,7 @@ export default function App() {
       previewMigration(cuesB, false);
       return;
     }
-    setCuesBUsed(null);
-    runAlign(cuesB);
+    runAlign(cuesB, () => setCuesBUsed(null));
   };
 
   /** 工作区入口：进入校准页并保留当前对齐组与人工决定。 */
@@ -232,35 +272,75 @@ export default function App() {
     setPhase('calibrate');
   };
 
-  /** 取消迁移：关闭预览、退出迁移校准页，旧工作区（groups/states）原封不动。 */
+  /** 取消迁移：终止计算、关闭预览、退出迁移校准页，旧工作区（groups/states）原封不动。 */
   const cancelMigration = () => {
+    runnerRef.current?.stop();
+    migrateRequestRef.current = null;
     setMigrateOpen(false);
     setMigrateBusy(false);
+    setMigrateError(null);
     setMigrateData(null);
     setMigrateMode(false);
     setPhase('workspace');
   };
 
-  /** 用新校准（或原始 B 时间）重新对齐，计算迁移预览并弹窗；不改动当前工作区。 */
+  /** 用新校准（或原始 B 时间）在 Worker 中重新对齐，计算迁移预览并弹窗；不改动当前工作区。 */
   const previewMigration = (b: Cue[], calibrated: boolean) => {
     if (!groups) return;
     const oldGroups = groups;
     const oldStates = states;
+    migrateRequestRef.current = { b, calibrated };
     setMigrateOpen(true);
     setMigrateBusy(true);
-    window.setTimeout(() => {
-      const gs = alignCues(cuesA, b);
-      // 校准只改 B 的时间、不改文本且保持条数顺序，内容比对统一使用原始 cuesB 文本
-      const plan = planMigration(oldGroups, gs, cuesA, cuesB);
-      setMigrateData({ oldGroups, oldStates, newGroups: gs, newCuesB: b, calibrated, plan });
-      setMigrateBusy(false);
-    }, 30);
+    setMigrateError(null);
+    setMigrateData(null);
+    runnerRef.current!.start(
+      {
+        kind: 'migrate' as const,
+        oldGroups,
+        newCuesB: b,
+        calibrated,
+        cuesA,
+        cuesB,
+      },
+      (res) => {
+        if (!res.ok || res.kind !== 'migrate') {
+          setMigrateBusy(false);
+          setMigrateError(!res.ok ? res.error : '迁移任务返回了非预期结果');
+          return;
+        }
+        const result = res.result;
+        setMigrateData({
+          oldGroups,
+          oldStates,
+          newGroups: result.newGroups,
+          newCuesB: result.newCuesB,
+          calibrated: result.calibrated,
+          plan: result.plan,
+        });
+        setMigrateBusy(false);
+      },
+      (err) => {
+        // 被取消 / 被新任务取代的失败回调已在 runner 内按序号丢弃，能到这里的都是当前任务失败
+        setMigrateBusy(false);
+        setMigrateError(errorMessage(err));
+      },
+    );
+  };
+
+  /** Worker 创建或计算失败后，按最近一次迁移请求重新发起预览计算。 */
+  const retryMigration = () => {
+    const req = migrateRequestRef.current;
+    if (!req) return;
+    previewMigration(req.b, req.calibrated);
   };
 
   /** 确认预览：一次提交新对齐、迁移决定，并清空时间/消重/断行/节奏/吸附相关采纳。 */
   const confirmMigration = () => {
     const data = migrateData;
-    if (!data || !data.plan.ok) return;
+    if (!data || !data.plan.ok || migrateBusy) return;
+    runnerRef.current?.stop();
+    migrateRequestRef.current = null;
     const { oldStates, newGroups, newCuesB, calibrated, plan } = data;
     const newBase = newGroups.map((g) => defaultStateFor(g, cuesA, newCuesB));
     const newStates = migrateStates(newGroups, newBase, oldStates, plan);
@@ -324,6 +404,10 @@ export default function App() {
   };
 
   const handleText = (side: 'A' | 'B', text: string, name?: string) => {
+    // 修改字幕即终止旧的对齐 / 迁移计算，迟到结果不再生效
+    runnerRef.current?.stop();
+    setAligning(false);
+    setAlignError(null);
     if (side === 'A') {
       setTextA(text);
       if (name) setNameA(name);
@@ -334,6 +418,9 @@ export default function App() {
   };
 
   const loadSample = () => {
+    runnerRef.current?.stop();
+    setAligning(false);
+    setAlignError(null);
     setNameA('示例A.srt');
     setNameB('示例B.srt');
     setTextA(SAMPLE_A);
@@ -351,6 +438,10 @@ export default function App() {
   };
 
   const resetAll = () => {
+    runnerRef.current?.stop();
+    migrateRequestRef.current = null;
+    setAligning(false);
+    setAlignError(null);
     setGroups(null);
     setStates([]);
     setCuesBUsed(null);
@@ -363,11 +454,17 @@ export default function App() {
     setSnapAccepted(new Set());
     setMigrateMode(false);
     setMigrateOpen(false);
+    setMigrateBusy(false);
+    setMigrateError(null);
     setMigrateData(null);
     setPhase('import');
   };
 
   const recalibrate = () => {
+    runnerRef.current?.stop();
+    migrateRequestRef.current = null;
+    setAligning(false);
+    setAlignError(null);
     setGroups(null);
     setStates([]);
     setCuesBUsed(null);
@@ -380,6 +477,8 @@ export default function App() {
     setSnapAccepted(new Set());
     setMigrateMode(false);
     setMigrateOpen(false);
+    setMigrateBusy(false);
+    setMigrateError(null);
     setMigrateData(null);
     setPhase('calibrate');
   };
@@ -852,10 +951,19 @@ export default function App() {
           onReset={resetAnchors}
           applied={false}
           aligning={aligning}
+          error={alignError}
           migrateMode={migrateMode}
           onApply={applyCalibration}
           onUseOriginal={restoreOriginalB}
-          onBack={migrateMode ? cancelMigration : () => setPhase('import')}
+          onCancel={cancelAlign}
+          onBack={
+            migrateMode
+              ? cancelMigration
+              : () => {
+                  cancelAlign();
+                  setPhase('import');
+                }
+          }
         />
       ) : (
         groups && (
@@ -1133,6 +1241,7 @@ export default function App() {
       <RecalibrateMigrateDialog
         open={migrateOpen}
         busy={migrateBusy}
+        error={migrateError}
         oldGroupCount={migrateData?.oldGroups.length ?? groups?.length ?? 0}
         newGroups={migrateData?.newGroups ?? null}
         newCuesA={cuesA}
@@ -1141,6 +1250,7 @@ export default function App() {
         calibrated={migrateData?.calibrated ?? false}
         anchorCount={calibFit.active.length}
         onClose={cancelMigration}
+        onRetry={retryMigration}
         onConfirm={confirmMigration}
       />
 

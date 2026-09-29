@@ -31,9 +31,13 @@ interface CalibratePanelProps {
   /** 迁移模式：从工作区带着旧对齐组进入，应用按钮只生成迁移预览而不直接替换工作区 */
   migrateMode?: boolean;
   aligning: boolean;
+  /** Worker 创建 / 计算失败原因（非空时展示并允许再次发起） */
+  error?: string | null;
   onApply(): void;
   /** 用原始 B 时间直接进入对齐（一键恢复原始 B 时间） */
   onUseOriginal(): void;
+  /** 取消正在进行的对齐计算（终止 Worker、结束忙碌、停留在本页） */
+  onCancel(): void;
   onBack(): void;
 }
 
@@ -202,6 +206,17 @@ export function CalibratePanel(props: CalibratePanelProps) {
         </div>
       )}
 
+      {props.aligning && (
+        <div className="cal-notice busy">
+          正在后台 Web Worker 中执行顺序对齐，页面仍可操作；可点下方「取消计算」终止本次计算。
+        </div>
+      )}
+      {props.error && (
+        <div className="cal-notice warn" role="alert">
+          对齐计算失败：{props.error}。当前设置与已导入字幕均未改动，可调整参数后再次发起。
+        </div>
+      )}
+
       <div className="cal-table-wrap">
         <table className="cal-table">
           <thead>
@@ -334,22 +349,28 @@ export function CalibratePanel(props: CalibratePanelProps) {
           )}
         </div>
         <span className="spacer" />
-        <button className="btn ghost lg" disabled={props.aligning} onClick={props.onUseOriginal}>
-          {props.migrateMode ? '用原始 B 时间重新对齐并预览' : '恢复原始 B 时间并对齐'}
-        </button>
-        <button
-          className="btn primary lg"
-          disabled={activeCount < 2 || props.aligning}
-          onClick={props.onApply}
-        >
-          {props.aligning
-            ? '对齐中…'
-            : props.migrateMode
-              ? '应用新校准并预览迁移'
-              : props.applied
-                ? '重新应用校准并对齐'
-                : '应用校准并开始对齐'}
-        </button>
+        {props.aligning ? (
+          <button className="btn warn lg" onClick={props.onCancel}>
+            取消计算
+          </button>
+        ) : (
+          <>
+            <button className="btn ghost lg" onClick={props.onUseOriginal}>
+              {props.migrateMode ? '用原始 B 时间重新对齐并预览' : '恢复原始 B 时间并对齐'}
+            </button>
+            <button
+              className="btn primary lg"
+              disabled={activeCount < 2}
+              onClick={props.onApply}
+            >
+              {props.migrateMode
+                ? '应用新校准并预览迁移'
+                : props.applied
+                  ? '重新应用校准并对齐'
+                  : '应用校准并开始对齐'}
+            </button>
+          </>
+        )}
       </div>
     </section>
   );

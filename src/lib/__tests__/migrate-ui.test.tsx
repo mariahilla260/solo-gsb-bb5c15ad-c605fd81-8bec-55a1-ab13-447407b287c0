@@ -23,13 +23,14 @@ describe('重新校准迁移弹窗', () => {
         calibrated={false}
         anchorCount={0}
         onClose={noop}
+        onRetry={noop}
         onConfirm={noop}
       />,
     );
     expect(html).toBe('');
   });
 
-  it('busy 时提示正在重新对齐', () => {
+  it('busy 时提示正在重新对齐且仍可取消', () => {
     const html = renderToString(
       <RecalibrateMigrateDialog
         open
@@ -42,10 +43,40 @@ describe('重新校准迁移弹窗', () => {
         calibrated
         anchorCount={4}
         onClose={noop}
+        onRetry={noop}
         onConfirm={noop}
       />,
     );
     expect(html).toContain('重新对齐');
+    expect(html).toContain('Web Worker');
+    // 忙碌时取消按钮仍可用（可终止计算、保留旧工作区）
+    expect(html).toMatch(/<button[^>]*>\s*取消（保留旧工作区）\s*<\/button>/);
+    // 确认按钮在忙碌时禁用
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>\s*确认并一次提交\s*<\/button>/);
+  });
+
+  it('计算失败时展示原因，提供再次计算与取消，确认按钮禁用', () => {
+    const html = renderToString(
+      <RecalibrateMigrateDialog
+        open
+        busy={false}
+        error="模拟的 Worker 创建失败"
+        oldGroupCount={3}
+        newGroups={null}
+        newCuesA={[]}
+        newCuesB={[]}
+        plan={null}
+        calibrated={false}
+        anchorCount={0}
+        onClose={noop}
+        onRetry={noop}
+        onConfirm={noop}
+      />,
+    );
+    expect(html).toContain('模拟的 Worker 创建失败');
+    expect(html).toContain('旧工作区');
+    expect(html).toContain('再次计算');
+    expect(html).toContain('取消（保留旧工作区）');
   });
 
   it('展示可迁移/歧义/无对应统计与明细，并标明一次提交、取消保留旧工作区', () => {
@@ -66,6 +97,7 @@ describe('重新校准迁移弹窗', () => {
         calibrated
         anchorCount={5}
         onClose={noop}
+        onRetry={noop}
         onConfirm={noop}
       />,
     );
