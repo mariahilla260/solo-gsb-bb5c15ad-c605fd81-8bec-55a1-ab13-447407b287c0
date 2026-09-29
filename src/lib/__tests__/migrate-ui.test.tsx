@@ -15,6 +15,7 @@ describe('重新校准迁移弹窗', () => {
       <RecalibrateMigrateDialog
         open={false}
         busy={false}
+        error={null}
         oldGroupCount={0}
         newGroups={null}
         newCuesA={[]}
@@ -23,17 +24,19 @@ describe('重新校准迁移弹窗', () => {
         calibrated={false}
         anchorCount={0}
         onClose={noop}
+        onRetry={noop}
         onConfirm={noop}
       />,
     );
     expect(html).toBe('');
   });
 
-  it('busy 时提示正在重新对齐', () => {
+  it('busy 时提示正在重新对齐，且取消按钮可用', () => {
     const html = renderToString(
       <RecalibrateMigrateDialog
         open
         busy
+        error={null}
         oldGroupCount={0}
         newGroups={null}
         newCuesA={[]}
@@ -42,10 +45,37 @@ describe('重新校准迁移弹窗', () => {
         calibrated
         anchorCount={4}
         onClose={noop}
+        onRetry={noop}
         onConfirm={noop}
       />,
     );
     expect(html).toContain('重新对齐');
+    expect(html).toContain('取消计算（保留旧工作区）');
+  });
+
+  it('Worker 失败时展示原因、提供重新计算，确认按钮禁用', () => {
+    const html = renderToString(
+      <RecalibrateMigrateDialog
+        open
+        busy={false}
+        error="worker crashed"
+        oldGroupCount={3}
+        newGroups={null}
+        newCuesA={[]}
+        newCuesB={[]}
+        plan={null}
+        calibrated
+        anchorCount={4}
+        onClose={noop}
+        onRetry={noop}
+        onConfirm={noop}
+      />,
+    );
+    expect(html).toContain('迁移预览计算失败');
+    expect(html).toContain('worker crashed');
+    expect(html).toContain('旧工作区保持原样');
+    expect(html).toContain('重新计算');
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>\s*确认并一次提交/);
   });
 
   it('展示可迁移/歧义/无对应统计与明细，并标明一次提交、取消保留旧工作区', () => {
@@ -58,6 +88,7 @@ describe('重新校准迁移弹窗', () => {
       <RecalibrateMigrateDialog
         open
         busy={false}
+        error={null}
         oldGroupCount={groups.length}
         newGroups={groups}
         newCuesA={a}
@@ -66,6 +97,7 @@ describe('重新校准迁移弹窗', () => {
         calibrated
         anchorCount={5}
         onClose={noop}
+        onRetry={noop}
         onConfirm={noop}
       />,
     );

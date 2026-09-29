@@ -15,6 +15,8 @@ const KIND_LABEL: Record<GroupKind, string> = {
 interface RecalibrateMigrateProps {
   open: boolean;
   busy: boolean;
+  /** Worker 创建或迁移预览计算失败时的原因 */
+  error?: string | null;
   oldGroupCount: number;
   newGroups: AlignGroup[] | null;
   newCuesA: Cue[];
@@ -24,6 +26,8 @@ interface RecalibrateMigrateProps {
   calibrated: boolean;
   anchorCount: number;
   onClose(): void;
+  /** Worker 失败后用相同参数再次发起计算 */
+  onRetry(): void;
   onConfirm(): void;
 }
 
@@ -32,6 +36,7 @@ const PAGE = 50;
 export function RecalibrateMigrateDialog({
   open,
   busy,
+  error,
   oldGroupCount,
   newGroups,
   newCuesA,
@@ -40,6 +45,7 @@ export function RecalibrateMigrateDialog({
   calibrated,
   anchorCount,
   onClose,
+  onRetry,
   onConfirm,
 }: RecalibrateMigrateProps) {
   const [shown, setShown] = useState(PAGE);
@@ -47,7 +53,17 @@ export function RecalibrateMigrateDialog({
 
   const body = () => {
     if (busy) {
-      return <div className="rm-notice">正在用新校准重新对齐并比对旧工作区…</div>;
+      return (
+        <div className="rm-notice">
+          <span className="spinner" aria-hidden="true" />
+          正在用新校准重新对齐并比对旧工作区…
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <div className="rm-notice warn">{`迁移预览计算失败：${error}。旧工作区保持原样，可重新发起计算或取消返回。`}</div>
+      );
     }
     if (!plan || !newGroups) {
       return <div className="rm-notice">尚未生成新对齐方案。</div>;
@@ -121,10 +137,19 @@ export function RecalibrateMigrateDialog({
             时间选择一律使用新组默认值；消重、断行、节奏与切点吸附的采纳将被清空，迁移后可继续冲突处理、预览与导出。
           </span>
           <span className="spacer" />
-          <button className="btn ghost" onClick={onClose} disabled={busy}>
-            取消（保留旧工作区）
+          <button className="btn ghost" onClick={onClose}>
+            {busy ? '取消计算（保留旧工作区）' : '取消（保留旧工作区）'}
           </button>
-          <button className="btn primary" onClick={onConfirm} disabled={busy || !plan?.ok}>
+          {error && !busy && (
+            <button className="btn warn" onClick={onRetry}>
+              重新计算
+            </button>
+          )}
+          <button
+            className="btn primary"
+            onClick={onConfirm}
+            disabled={busy || !!error || !plan?.ok}
+          >
             确认并一次提交
           </button>
         </footer>

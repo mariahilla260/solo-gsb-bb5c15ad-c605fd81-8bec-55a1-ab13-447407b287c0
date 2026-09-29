@@ -19,9 +19,11 @@ describe('校准相关组件渲染冒烟', () => {
         cuesA={parseSrt(SAMPLE_A)}
         cuesB={parseSrt(SAMPLE_B)}
         busy={false}
+        error={null}
         onText={noop}
         onCalibrate={noop}
         onSkipCalibrate={noop}
+        onCancel={noop}
         onSample={noop}
       />,
     );
@@ -50,7 +52,9 @@ describe('校准相关组件渲染冒烟', () => {
         onReset={noop}
         applied={false}
         aligning={false}
+        alignError={null}
         onApply={noop}
+        onCancel={noop}
         onUseOriginal={noop}
         onBack={noop}
       />,

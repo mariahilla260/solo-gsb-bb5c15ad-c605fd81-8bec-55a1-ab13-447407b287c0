@@ -10,11 +10,15 @@ interface ImportPanelProps {
   cuesA: Cue[];
   cuesB: Cue[];
   busy: boolean;
+  /** Worker 创建或对齐计算失败时的原因 */
+  error: string | null;
   onText(side: 'A' | 'B', text: string, name?: string): void;
   /** 进入时间轴校准步骤 */
   onCalibrate(): void;
   /** 跳过校准，直接用原始 B 时间顺序对齐 */
   onSkipCalibrate(): void;
+  /** 取消正在进行的对齐计算 */
+  onCancel(): void;
   onSample(): void;
 }
 
@@ -29,6 +33,7 @@ export function ImportPanel(props: ImportPanelProps) {
           name={props.nameA}
           text={props.textA}
           cues={props.cuesA}
+          busy={props.busy}
           onText={props.onText}
         />
         <div className="import-vs">⇄</div>
@@ -38,6 +43,7 @@ export function ImportPanel(props: ImportPanelProps) {
           name={props.nameB}
           text={props.textB}
           cues={props.cuesB}
+          busy={props.busy}
           onText={props.onText}
         />
       </div>
@@ -48,11 +54,26 @@ export function ImportPanel(props: ImportPanelProps) {
         <button className="btn ghost lg" disabled={!canAlign} onClick={props.onSkipCalibrate}>
           跳过校准，直接对齐
         </button>
-        <button className="btn ghost lg" onClick={props.onSample}>
-          加载示例数据
-        </button>
-        {!canAlign && !props.busy && (
-          <span className="hint">请先为两个版本各导入一份 SRT（文件选择 / 拖拽 / 粘贴）</span>
+        {props.busy ? (
+          <button className="btn warn lg" onClick={props.onCancel}>
+            取消对齐
+          </button>
+        ) : (
+          <button className="btn ghost lg" onClick={props.onSample}>
+            加载示例数据
+          </button>
+        )}
+        {props.busy ? (
+          <span className="hint busy-hint">
+            <span className="spinner" aria-hidden="true" />
+            正在后台对齐，页面可继续操作；结果返回前可取消。
+          </span>
+        ) : props.error ? (
+          <span className="hint error-hint" role="alert">
+            对齐失败：{props.error}。请调整字幕后重试。
+          </span>
+        ) : (
+          !canAlign && <span className="hint">请先为两个版本各导入一份 SRT（文件选择 / 拖拽 / 粘贴）</span>
         )}
       </div>
     </section>
@@ -65,10 +86,12 @@ interface SourceCardProps {
   name: string;
   text: string;
   cues: Cue[];
+  /** 对齐计算进行中：禁用字幕编辑（改动会终止当前计算），页面其余部分仍可操作 */
+  busy?: boolean;
   onText(side: 'A' | 'B', text: string, name?: string): void;
 }
 
-function SourceCard({ side, title, name, text, cues, onText }: SourceCardProps) {
+function SourceCard({ side, title, name, text, cues, busy, onText }: SourceCardProps) {
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -105,7 +128,7 @@ function SourceCard({ side, title, name, text, cues, onText }: SourceCardProps) 
           {name}
         </span>
       </header>
-      <button type="button" className="drop" onClick={() => fileRef.current?.click()}>
+      <button type="button" className="drop" onClick={() => fileRef.current?.click()} disabled={busy}>
         {cues.length > 0 ? (
           <>
             <span className="drop-ok">✓ 已解析 {cues.length} 条字幕</span>
@@ -134,6 +157,7 @@ function SourceCard({ side, title, name, text, cues, onText }: SourceCardProps) 
         placeholder="…或直接粘贴 SRT 内容"
         value={text}
         spellCheck={false}
+        disabled={busy}
         onChange={(e) => onText(side, e.target.value)}
       />
     </div>

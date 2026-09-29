@@ -31,7 +31,11 @@ interface CalibratePanelProps {
   /** 迁移模式：从工作区带着旧对齐组进入，应用按钮只生成迁移预览而不直接替换工作区 */
   migrateMode?: boolean;
   aligning: boolean;
+  /** Worker 创建或对齐计算失败时的原因 */
+  alignError?: string | null;
   onApply(): void;
+  /** 取消正在进行的对齐 / 迁移预览计算 */
+  onCancel(): void;
   /** 用原始 B 时间直接进入对齐（一键恢复原始 B 时间） */
   onUseOriginal(): void;
   onBack(): void;
@@ -332,18 +336,39 @@ export function CalibratePanel(props: CalibratePanelProps) {
               </ol>
             </details>
           )}
+          {props.aligning && (
+            <span className="hint busy-hint">
+              <span className="spinner" aria-hidden="true" />
+              {props.migrateMode ? '正在后台重新对齐并计算迁移预览' : '正在后台执行顺序对齐'}
+              ，页面可继续操作，结果返回前可取消。
+            </span>
+          )}
+          {!props.aligning && props.alignError && (
+            <span className="hint error-hint" role="alert">
+              {props.migrateMode ? '迁移预览计算失败：' : '对齐失败：'}
+              {props.alignError}。可再次发起。
+            </span>
+          )}
         </div>
         <span className="spacer" />
-        <button className="btn ghost lg" disabled={props.aligning} onClick={props.onUseOriginal}>
-          {props.migrateMode ? '用原始 B 时间重新对齐并预览' : '恢复原始 B 时间并对齐'}
-        </button>
+        {props.aligning ? (
+          <button className="btn warn lg" onClick={props.onCancel}>
+            取消计算
+          </button>
+        ) : (
+          <button className="btn ghost lg" onClick={props.onUseOriginal}>
+            {props.migrateMode ? '用原始 B 时间重新对齐并预览' : '恢复原始 B 时间并对齐'}
+          </button>
+        )}
         <button
           className="btn primary lg"
-          disabled={activeCount < 2 || props.aligning}
+          disabled={props.aligning || (!props.migrateMode && activeCount < 2)}
           onClick={props.onApply}
         >
           {props.aligning
-            ? '对齐中…'
+            ? props.migrateMode
+              ? '预览计算中…'
+              : '对齐中…'
             : props.migrateMode
               ? '应用新校准并预览迁移'
               : props.applied

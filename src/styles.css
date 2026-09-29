@@ -345,6 +345,49 @@ body {
   background: rgba(251, 191, 36, 0.22);
 }
 
+.btn.warn {
+  border-color: rgba(251, 191, 36, 0.55);
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--amber);
+}
+
+.btn.warn:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.22);
+  border-color: var(--amber);
+}
+
+/* ---------- 后台计算忙碌 / 错误提示 ---------- */
+.busy-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.error-hint {
+  color: var(--red);
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rm-notice .spinner {
+  margin-right: 4px;
+}
+
 /* ---------- 已导入摘要 ---------- */
 .import-summary {
   display: flex;
@@ -2085,6 +2128,10 @@ body {
   padding: 28px 12px;
   text-align: center;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .rm-notice.warn {
